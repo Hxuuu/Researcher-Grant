@@ -1,0 +1,19 @@
+# Core AI
+anthropic>=0.40.0
+
+# Market data (requires network access to Yahoo Finance)
+# Note: multitasking must be installed separately if pip build fails
+# pip install multitasking --no-build-isolation OR use the stub in scripts/
+yfinance>=0.2.40
+pandas>=2.0.0
+numpy>=1.24.0
+
+# HTTP
+requests>=2.31.0
+curl-cffi>=0.7,<0.14
+
+# Utilities
+python-dotenv>=1.0.0
+rich>=13.0.0
+beautifulsoup4>=4.12.0
+frozendict>=2.3.4
