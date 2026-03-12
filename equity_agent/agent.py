@@ -9,8 +9,42 @@ import os
 from typing import Iterator
 
 import anthropic
+import httpx
 
 from .tools import TOOL_DEFINITIONS, execute_tool
+
+
+def _make_client(api_key: str | None = None) -> anthropic.Anthropic:
+    """
+    Create an Anthropic client, using Bearer auth with the Claude Code
+    session token when running inside a Claude Code remote environment.
+    """
+    # Prefer explicit key
+    if api_key:
+        return anthropic.Anthropic(api_key=api_key)
+
+    # Standard env var
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        return anthropic.Anthropic()
+
+    # Claude Code remote environment: use session ingress token as Bearer
+    session_token_path = "/home/claude/.claude/remote/.session_ingress_token"
+    if os.path.exists(session_token_path):
+        with open(session_token_path) as f:
+            token = f.read().strip()
+
+        def _swap_auth(request: httpx.Request) -> None:
+            request.headers["Authorization"] = f"Bearer {token}"
+            # Remove x-api-key so the Bearer header is used instead
+            if "x-api-key" in request.headers:
+                del request.headers["x-api-key"]
+
+        http_client = httpx.Client(event_hooks={"request": [_swap_auth]})
+        return anthropic.Anthropic(api_key="placeholder", http_client=http_client)
+
+    raise ValueError(
+        "No API key found. Set ANTHROPIC_API_KEY or run inside Claude Code."
+    )
 
 SYSTEM_PROMPT = """You are an expert equity research analyst with deep knowledge of financial markets,
 valuation methodologies, and investment analysis. Your job is to help users research stocks and make
@@ -51,9 +85,7 @@ class EquityResearchAgent:
     """
 
     def __init__(self, api_key: str | None = None, model: str = "claude-opus-4-6"):
-        self.client = anthropic.Anthropic(
-            api_key=api_key or os.environ.get("ANTHROPIC_API_KEY")
-        )
+        self.client = _make_client(api_key)
         self.model = model
         self.conversation_history: list[dict] = []
 

@@ -183,18 +183,17 @@ def main():
 
     args = parser.parse_args()
 
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
+    from equity_agent.agent import EquityResearchAgent
+
+    try:
+        agent = EquityResearchAgent(api_key=os.environ.get("ANTHROPIC_API_KEY"), model=args.model)
+    except ValueError as e:
         console.print(
-            "[red]Error: ANTHROPIC_API_KEY environment variable not set.[/red]\n"
+            f"[red]Error: {e}[/red]\n"
             "Set it with: [yellow]export ANTHROPIC_API_KEY=your_key_here[/yellow]\n"
             "Or create a [yellow].env[/yellow] file with: [yellow]ANTHROPIC_API_KEY=your_key_here[/yellow]"
         )
         sys.exit(1)
-
-    from equity_agent.agent import EquityResearchAgent
-
-    agent = EquityResearchAgent(api_key=api_key, model=args.model)
 
     if args.ticker:
         ticker = args.ticker.upper()
