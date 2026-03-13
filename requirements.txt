@@ -12,6 +12,10 @@ numpy>=1.24.0
 requests>=2.31.0
 curl-cffi>=0.7,<0.14
 
+# Web app
+fastapi>=0.110.0
+uvicorn>=0.27.0
+
 # Utilities
 python-dotenv>=1.0.0
 rich>=13.0.0

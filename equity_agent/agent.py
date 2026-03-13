@@ -6,7 +6,7 @@ Uses an agentic loop with tool use to research stocks and generate insights.
 
 import json
 import os
-from typing import Iterator
+from typing import Any, Iterator
 
 import anthropic
 import httpx
@@ -168,6 +168,77 @@ class EquityResearchAgent:
 
             # Any other stop reason — exit
             break
+
+    def research_events(self, query: str) -> Iterator[dict[str, Any]]:
+        """
+        Stream structured events for the web UI.
+
+        Event shapes:
+            {"type": "text",       "content": str}
+            {"type": "tool_start", "name": str, "input": dict}
+            {"type": "tool_end",   "name": str}
+            {"type": "done"}
+            {"type": "error",      "message": str}
+        """
+        self.conversation_history.append({"role": "user", "content": query})
+
+        try:
+            while True:
+                response_content = []
+                stop_reason = None
+
+                with self.client.messages.stream(
+                    model=self.model,
+                    max_tokens=4096,
+                    system=SYSTEM_PROMPT,
+                    tools=TOOL_DEFINITIONS,
+                    messages=self.conversation_history,
+                    thinking={"type": "adaptive"},
+                ) as stream:
+                    for event in stream:
+                        if event.type == "content_block_delta":
+                            if event.delta.type == "text_delta":
+                                yield {"type": "text", "content": event.delta.text}
+
+                    final_msg = stream.get_final_message()
+                    response_content = final_msg.content
+                    stop_reason = final_msg.stop_reason
+
+                self.conversation_history.append(
+                    {"role": "assistant", "content": response_content}
+                )
+
+                if stop_reason == "end_turn":
+                    break
+
+                if stop_reason == "tool_use":
+                    tool_use_blocks = [b for b in response_content if b.type == "tool_use"]
+                    if not tool_use_blocks:
+                        break
+
+                    tool_results = []
+                    for tool_call in tool_use_blocks:
+                        yield {"type": "tool_start", "name": tool_call.name, "input": tool_call.input}
+                        result = execute_tool(tool_call.name, tool_call.input)
+                        yield {"type": "tool_end", "name": tool_call.name}
+                        tool_results.append({
+                            "type": "tool_result",
+                            "tool_use_id": tool_call.id,
+                            "content": result,
+                        })
+
+                    self.conversation_history.append(
+                        {"role": "user", "content": tool_results}
+                    )
+                    continue
+
+                break
+
+        except Exception as e:
+            yield {"type": "error", "message": str(e)}
+            return
+
+        yield {"type": "done"}
 
     def research_sync(self, query: str) -> str:
         """

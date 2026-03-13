@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Equity Research Agent</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<style>
+  /* ── base ── */
+  body { font-family: 'Inter', system-ui, sans-serif; }
+
+  /* ── markdown output ── */
+  .prose h1, .prose h2, .prose h3 { font-weight: 700; margin: 1rem 0 .4rem; }
+  .prose h1 { font-size: 1.4rem; border-bottom: 1px solid #334155; padding-bottom: .3rem; }
+  .prose h2 { font-size: 1.15rem; color: #93c5fd; }
+  .prose h3 { font-size: 1rem; color: #7dd3fc; }
+  .prose p  { margin: .5rem 0; line-height: 1.65; }
+  .prose ul, .prose ol { padding-left: 1.4rem; margin: .5rem 0; }
+  .prose li { margin: .25rem 0; }
+  .prose strong { color: #f1f5f9; }
+  .prose em { color: #94a3b8; }
+  .prose code { background: #1e293b; padding: 1px 5px; border-radius: 4px;
+                font-family: 'JetBrains Mono', monospace; font-size: .85em; color: #7dd3fc; }
+  .prose pre  { background: #0f172a; padding: .8rem 1rem; border-radius: 6px;
+                overflow-x: auto; margin: .75rem 0; }
+  .prose pre code { background: none; padding: 0; color: #e2e8f0; }
+  .prose blockquote { border-left: 3px solid #3b82f6; padding-left: .75rem; color: #94a3b8; margin: .5rem 0; }
+  .prose table { width: 100%; border-collapse: collapse; margin: .75rem 0; font-size: .9rem; }
+  .prose th { background: #1e293b; padding: .4rem .75rem; text-align: left; color: #93c5fd; }
+  .prose td { padding: .35rem .75rem; border-bottom: 1px solid #1e293b; }
+  .prose tr:hover td { background: #0f172a; }
+
+  /* ── tool pill ── */
+  .tool-pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: #0f172a; border: 1px solid #334155;
+    border-radius: 999px; padding: 3px 10px 3px 8px;
+    font-size: .75rem; color: #94a3b8; margin: 2px 3px;
+  }
+  .tool-pill.loading .dot { animation: spin 1s linear infinite; }
+  .tool-pill.done { border-color: #166534; color: #4ade80; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── blinking cursor ── */
+  .cursor::after { content: '▋'; animation: blink .7s step-end infinite; color: #3b82f6; }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* ── scrollbar ── */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: #0f172a; }
+  ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+</style>
+</head>
+
+<body class="bg-slate-950 text-slate-200 min-h-screen flex flex-col">
+
+<!-- ── Header ── -->
+<header class="bg-slate-900 border-b border-slate-800 px-6 py-3 flex items-center gap-3 shrink-0">
+  <svg class="w-7 h-7 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"
+      d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z"/>
+  </svg>
+  <h1 class="text-lg font-semibold text-white tracking-tight">Equity Research Agent</h1>
+  <span class="ml-auto text-xs text-slate-500 font-mono" id="model-badge">claude-opus-4-6</span>
+  <button id="reset-btn"
+    class="ml-3 text-xs px-3 py-1.5 rounded-md border border-slate-700 text-slate-400
+           hover:border-blue-500 hover:text-blue-400 transition-colors">
+    New session
+  </button>
+</header>
+
+<!-- ── Main layout ── -->
+<div class="flex flex-1 overflow-hidden">
+
+  <!-- Left panel: input controls -->
+  <aside class="w-72 bg-slate-900 border-r border-slate-800 flex flex-col p-4 gap-4 shrink-0">
+
+    <!-- Mode tabs -->
+    <div>
+      <p class="text-xs uppercase tracking-widest text-slate-500 mb-2">Mode</p>
+      <div class="flex rounded-lg overflow-hidden border border-slate-700 text-sm">
+        <button data-mode="ticker"
+          class="mode-btn flex-1 py-2 text-center bg-blue-600 text-white font-medium transition-colors">
+          Ticker
+        </button>
+        <button data-mode="compare"
+          class="mode-btn flex-1 py-2 text-center text-slate-400 hover:text-white transition-colors">
+          Compare
+        </button>
+        <button data-mode="query"
+          class="mode-btn flex-1 py-2 text-center text-slate-400 hover:text-white transition-colors">
+          Query
+        </button>
+      </div>
+    </div>
+
+    <!-- Ticker input -->
+    <div id="input-ticker" class="mode-input">
+      <label class="text-xs uppercase tracking-widest text-slate-500">Stock Ticker</label>
+      <input id="ticker-input" type="text" placeholder="e.g. AAPL, NVDA, MSFT"
+        class="mt-1.5 w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2.5
+               text-white placeholder-slate-500 focus:outline-none focus:border-blue-500
+               uppercase tracking-widest font-mono text-sm" />
+    </div>
+
+    <!-- Compare input -->
+    <div id="input-compare" class="mode-input hidden">
+      <label class="text-xs uppercase tracking-widest text-slate-500">Tickers (space or comma separated)</label>
+      <input id="compare-input" type="text" placeholder="e.g. NVDA AMD INTC"
+        class="mt-1.5 w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2.5
+               text-white placeholder-slate-500 focus:outline-none focus:border-blue-500
+               uppercase tracking-widest font-mono text-sm" />
+    </div>
+
+    <!-- Query input -->
+    <div id="input-query" class="mode-input hidden">
+      <label class="text-xs uppercase tracking-widest text-slate-500">Research Question</label>
+      <textarea id="query-input" rows="4" placeholder="e.g. What are the key risks for semiconductor stocks in 2025?"
+        class="mt-1.5 w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2.5
+               text-white placeholder-slate-500 focus:outline-none focus:border-blue-500
+               text-sm resize-none"></textarea>
+    </div>
+
+    <!-- Analyze button -->
+    <button id="analyze-btn"
+      class="w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-semibold
+             rounded-lg transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed">
+      Analyze
+    </button>
+
+    <!-- Quick suggestions -->
+    <div>
+      <p class="text-xs uppercase tracking-widest text-slate-500 mb-2">Quick picks</p>
+      <div class="flex flex-wrap gap-1.5">
+        <button class="quick-btn" data-ticker="NVDA">NVDA</button>
+        <button class="quick-btn" data-ticker="AAPL">AAPL</button>
+        <button class="quick-btn" data-ticker="MSFT">MSFT</button>
+        <button class="quick-btn" data-ticker="TSLA">TSLA</button>
+        <button class="quick-btn" data-ticker="META">META</button>
+        <button class="quick-btn" data-ticker="AMZN">AMZN</button>
+        <button class="quick-btn" data-ticker="GOOGL">GOOGL</button>
+        <button class="quick-btn" data-ticker="JPM">JPM</button>
+      </div>
+    </div>
+
+    <!-- Tool activity log -->
+    <div class="mt-auto">
+      <p class="text-xs uppercase tracking-widest text-slate-500 mb-2">Data fetched</p>
+      <div id="tool-log" class="flex flex-wrap gap-1 min-h-[28px]"></div>
+    </div>
+
+  </aside>
+
+  <!-- Main content area -->
+  <main class="flex-1 flex flex-col overflow-hidden">
+
+    <!-- Response area -->
+    <div id="response-area" class="flex-1 overflow-y-auto p-6">
+
+      <!-- Welcome state -->
+      <div id="welcome" class="flex flex-col items-center justify-center h-full text-center gap-4">
+        <div class="w-16 h-16 rounded-2xl bg-blue-600/20 flex items-center justify-center border border-blue-500/30">
+          <svg class="w-8 h-8 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+              d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z"/>
+          </svg>
+        </div>
+        <div>
+          <h2 class="text-xl font-semibold text-white">Equity Research Agent</h2>
+          <p class="text-slate-400 mt-1 text-sm max-w-xs">
+            Powered by Claude with live market data tools. Enter a ticker or ask a research question to get started.
+          </p>
+        </div>
+        <div class="flex gap-2 flex-wrap justify-center mt-2">
+          <span class="text-xs bg-slate-800 border border-slate-700 rounded-full px-3 py-1 text-slate-400">
+            📊 Financial statements
+          </span>
+          <span class="text-xs bg-slate-800 border border-slate-700 rounded-full px-3 py-1 text-slate-400">
+            📈 Valuation metrics
+          </span>
+          <span class="text-xs bg-slate-800 border border-slate-700 rounded-full px-3 py-1 text-slate-400">
+            🎯 Analyst estimates
+          </span>
+          <span class="text-xs bg-slate-800 border border-slate-700 rounded-full px-3 py-1 text-slate-400">
+            📰 Recent news
+          </span>
+        </div>
+      </div>
+
+      <!-- Messages container -->
+      <div id="messages" class="hidden flex flex-col gap-6"></div>
+
+    </div>
+
+    <!-- Bottom status bar -->
+    <div id="status-bar"
+      class="shrink-0 border-t border-slate-800 px-6 py-2 flex items-center gap-2 text-xs text-slate-500 bg-slate-900">
+      <span id="status-text">Ready</span>
+    </div>
+
+  </main>
+</div>
+
+<!-- Quick-pick button style -->
+<style>
+  .quick-btn {
+    font-size: .7rem; font-family: monospace; font-weight: 600;
+    background: #1e293b; border: 1px solid #334155;
+    color: #94a3b8; border-radius: 6px; padding: 3px 8px;
+    cursor: pointer; transition: all .15s;
+  }
+  .quick-btn:hover { border-color: #3b82f6; color: #60a5fa; background: #0f172a; }
+</style>
+
+<script>
+// ── Marked.js config ──────────────────────────────────────────────────────
+marked.setOptions({ breaks: true, gfm: true });
+
+// ── State ─────────────────────────────────────────────────────────────────
+let mode = 'ticker';
+let isLoading = false;
+
+// ── DOM refs ──────────────────────────────────────────────────────────────
+const analyzeBtn   = document.getElementById('analyze-btn');
+const resetBtn     = document.getElementById('reset-btn');
+const statusText   = document.getElementById('status-text');
+const toolLog      = document.getElementById('tool-log');
+const messagesEl   = document.getElementById('messages');
+const welcomeEl    = document.getElementById('welcome');
+const modelBadge   = document.getElementById('model-badge');
+
+// ── Health check → populate model badge ──────────────────────────────────
+fetch('/api/health').then(r => r.json()).then(d => {
+  modelBadge.textContent = d.model || 'claude-opus-4-6';
+}).catch(() => {});
+
+// ── Mode switching ────────────────────────────────────────────────────────
+document.querySelectorAll('.mode-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    mode = btn.dataset.mode;
+    document.querySelectorAll('.mode-btn').forEach(b => {
+      b.classList.toggle('bg-blue-600', b.dataset.mode === mode);
+      b.classList.toggle('text-white',  b.dataset.mode === mode);
+      b.classList.toggle('font-medium', b.dataset.mode === mode);
+      b.classList.toggle('text-slate-400', b.dataset.mode !== mode);
+    });
+    document.querySelectorAll('.mode-input').forEach(el => el.classList.add('hidden'));
+    document.getElementById(`input-${mode}`).classList.remove('hidden');
+  });
+});
+
+// ── Quick picks ───────────────────────────────────────────────────────────
+document.querySelectorAll('.quick-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    // Switch to ticker mode, fill in ticker, and submit
+    document.querySelector('[data-mode="ticker"]').click();
+    document.getElementById('ticker-input').value = btn.dataset.ticker;
+    runQuery();
+  });
+});
+
+// ── Reset ─────────────────────────────────────────────────────────────────
+resetBtn.addEventListener('click', async () => {
+  await fetch('/api/reset', { method: 'POST' });
+  messagesEl.innerHTML = '';
+  toolLog.innerHTML = '';
+  messagesEl.classList.add('hidden');
+  welcomeEl.classList.remove('hidden');
+  statusText.textContent = 'Session reset';
+  setTimeout(() => statusText.textContent = 'Ready', 2000);
+});
+
+// ── Analyze button ────────────────────────────────────────────────────────
+analyzeBtn.addEventListener('click', runQuery);
+document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') runQuery();
+});
+
+// ── Build query string from current mode/inputs ───────────────────────────
+function buildQuery() {
+  if (mode === 'ticker') {
+    const t = document.getElementById('ticker-input').value.trim().toUpperCase();
+    if (!t) return null;
+    return `Please provide a comprehensive equity research analysis of ${t}. ` +
+           `Cover the business overview, recent financial performance, key metrics, ` +
+           `valuation, analyst estimates, recent news, and your overall assessment ` +
+           `with bull/bear case.`;
+  }
+  if (mode === 'compare') {
+    const raw = document.getElementById('compare-input').value.trim();
+    if (!raw) return null;
+    const tickers = raw.toUpperCase().split(/[\s,]+/).filter(Boolean);
+    if (tickers.length < 2) return null;
+    return `Compare the following stocks side by side: ${tickers.join(', ')}. ` +
+           `Analyze their valuations, financials, growth, and give a relative ` +
+           `ranking with your recommendation on which offers the best risk/reward.`;
+  }
+  if (mode === 'query') {
+    const q = document.getElementById('query-input').value.trim();
+    return q || null;
+  }
+  return null;
+}
+
+// ── Main run function ─────────────────────────────────────────────────────
+async function runQuery() {
+  if (isLoading) return;
+  const query = buildQuery();
+  if (!query) {
+    flash('Please enter a ticker or question first.'); return;
+  }
+
+  isLoading = true;
+  analyzeBtn.disabled = true;
+  analyzeBtn.textContent = 'Analyzing…';
+  toolLog.innerHTML = '';
+
+  // Hide welcome, show messages
+  welcomeEl.classList.add('hidden');
+  messagesEl.classList.remove('hidden');
+
+  // User bubble
+  appendUserBubble(query);
+
+  // Assistant bubble (streaming)
+  const { container, textEl, toolsEl } = appendAssistantBubble();
+
+  statusText.textContent = 'Connecting…';
+  let fullText = '';
+  let activePills = {};
+
+  try {
+    const resp = await fetch('/api/research', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query }),
+    });
+
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+
+    statusText.textContent = 'Claude is thinking…';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+
+      // Process complete SSE lines
+      const lines = buf.split('\n');
+      buf = lines.pop(); // keep incomplete line
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        let event;
+        try { event = JSON.parse(line.slice(6)); } catch { continue; }
+
+        if (event.type === 'text') {
+          fullText += event.content;
+          textEl.innerHTML = marked.parse(fullText);
+          textEl.classList.add('cursor');
+          container.scrollIntoView({ block: 'end', behavior: 'smooth' });
+
+        } else if (event.type === 'tool_start') {
+          statusText.textContent = `Fetching ${friendlyName(event.name)}…`;
+          const pill = createToolPill(event.name, 'loading');
+          activePills[event.name] = pill;
+          toolsEl.appendChild(pill);
+          toolLog.appendChild(createToolPill(event.name, 'loading'));
+
+        } else if (event.type === 'tool_end') {
+          statusText.textContent = 'Processing data…';
+          const pill = activePills[event.name];
+          if (pill) { pill.classList.remove('loading'); pill.classList.add('done'); }
+          // Update tool log pills to done
+          toolLog.querySelectorAll('.tool-pill.loading').forEach(p => {
+            if (p.dataset.tool === event.name) { p.classList.remove('loading'); p.classList.add('done'); }
+          });
+
+        } else if (event.type === 'done') {
+          textEl.classList.remove('cursor');
+          statusText.textContent = 'Done';
+          setTimeout(() => statusText.textContent = 'Ready', 3000);
+
+        } else if (event.type === 'error') {
+          textEl.innerHTML += `<p class="text-red-400 mt-2">⚠ ${event.message}</p>`;
+          textEl.classList.remove('cursor');
+          statusText.textContent = 'Error';
+        }
+      }
+    }
+  } catch (err) {
+    textEl.innerHTML += `<p class="text-red-400 mt-2">⚠ ${err.message}</p>`;
+    textEl.classList.remove('cursor');
+    statusText.textContent = 'Error';
+  } finally {
+    isLoading = false;
+    analyzeBtn.disabled = false;
+    analyzeBtn.textContent = 'Analyze';
+  }
+}
+
+// ── DOM helpers ───────────────────────────────────────────────────────────
+
+function appendUserBubble(text) {
+  const el = document.createElement('div');
+  el.className = 'flex justify-end';
+  el.innerHTML = `
+    <div class="max-w-xl bg-blue-600/20 border border-blue-500/30 rounded-2xl rounded-tr-sm
+                px-4 py-3 text-sm text-blue-100">
+      ${escapeHtml(text.length > 200 ? text.slice(0, 200) + '…' : text)}
+    </div>`;
+  messagesEl.appendChild(el);
+  el.scrollIntoView({ block: 'end' });
+}
+
+function appendAssistantBubble() {
+  const container = document.createElement('div');
+  container.className = 'flex flex-col gap-2';
+
+  // Tool pills area (inline, above response)
+  const toolsEl = document.createElement('div');
+  toolsEl.className = 'flex flex-wrap gap-1 empty:hidden';
+
+  // Text area
+  const textEl = document.createElement('div');
+  textEl.className = 'prose text-sm text-slate-300 leading-relaxed';
+  textEl.innerHTML = '<span class="text-slate-500 italic text-xs">Thinking…</span>';
+
+  container.appendChild(toolsEl);
+  container.appendChild(textEl);
+  messagesEl.appendChild(container);
+  container.scrollIntoView({ block: 'end' });
+
+  return { container, textEl, toolsEl };
+}
+
+function createToolPill(name, state) {
+  const pill = document.createElement('span');
+  pill.className = `tool-pill ${state}`;
+  pill.dataset.tool = name;
+  const icon = state === 'loading'
+    ? `<svg class="dot w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+         <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83
+                  M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+       </svg>`
+    : `<svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+         <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
+       </svg>`;
+  pill.innerHTML = `${icon} ${friendlyName(name)}`;
+  return pill;
+}
+
+const TOOL_LABELS = {
+  get_stock_price: 'Price',
+  get_financial_statements: 'Financials',
+  get_key_metrics: 'Metrics',
+  get_analyst_estimates: 'Estimates',
+  get_company_news: 'News',
+  compare_stocks: 'Compare',
+  get_sector_info: 'Sector Info',
+};
+
+function friendlyName(name) {
+  return TOOL_LABELS[name] || name.replace(/_/g, ' ');
+}
+
+function escapeHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function flash(msg) {
+  const old = statusText.textContent;
+  statusText.textContent = msg;
+  statusText.classList.add('text-yellow-400');
+  setTimeout(() => { statusText.textContent = old; statusText.classList.remove('text-yellow-400'); }, 2500);
+}
+</script>
+</body>
+</html>
